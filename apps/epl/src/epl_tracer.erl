@@ -65,7 +65,7 @@ unsubscribe(Node, Pid) ->
 %% @doc Runs provided `Fun' with `Args' on `Node'.
 -spec command(Node :: node(), Fun :: fun(), Args :: list()) -> tuple().
 command(Node, Fun, Args) ->
-    gen_server:call(Node, {command, Fun, Args}).
+    gen_server:call(Node, {command, Fun, Args}, 10000).
 
 %% @doc Traces provied `Pid'.
 -spec trace_pid(Pid :: pid()) -> ok.
@@ -128,6 +128,15 @@ init(Node) ->
                  erlang:trace(all, true, TraceFlags),
                  F(F, Ref, undefined);
             (F, Ref, Trace) ->
+                 Name = fun(Pid) ->
+                            try
+                                case erlang:process_info(Pid, registered_name) of
+                                    undefined -> Pid;
+                                    {registered_name, RName} -> RName
+                                end
+                            catch _:_ -> Pid
+                            end
+                         end,
                  receive
                      {trace_ts, Pid, 'receive', Msg, _TS} when Pid /= self() ->
                          %% we count received messages and their sizes
@@ -158,20 +167,50 @@ init(Node) ->
                        when Pid1 < Pid2, Pid1 /= self(), Pid2 /= self() ->
                          %% we have one key for each Pid pair
                          %% the smaller Pid is first element of the key
-                         case ets:lookup(epl_send, {Pid1, Pid2}) of
-                             [] -> ets:insert(epl_send, {{Pid1, Pid2}, 1, 0});
+                         Name1 = Name(Pid1),
+                         Name2 = Name(Pid2),
+                         Insert = fun() ->
+                            case ets:lookup(epl_send, {Name1, Name2}) of
+                             [] -> ets:insert(epl_send, {{Name1, Name2}, 1, 0});
                              _  -> ets:update_counter(epl_send,
-                                                      {Pid1, Pid2}, {2, 1})
+                                                      {Name1, Name2}, {2, 1})
+                            end
                          end,
+                         %% we have one key for each Pid pair
+                         %% the smaller Pid is first element of the key
+                         try
+
+                            case {Name1, Name2} of
+                                {Pid1, Pid2} -> ok;
+                                _ -> Insert()
+                            end
+
+                         catch
+                            _:_ -> Insert()
+                         end,
+
                          F(F, Ref, Trace);
                      {trace_ts, Pid1, send, _Msg, Pid2, _TS}
                        when Pid1 > Pid2, Pid1 /= self(), Pid2 /= self() ->
+                         Name1 = Name(Pid1),
+                         Name2 = Name(Pid2),
+                         Insert = fun() ->
+                            case ets:lookup(epl_send, {Name2, Name1}) of
+                                [] -> ets:insert(epl_send, {{Name2, Name1}, 0, 1});
+                                _  -> ets:update_counter(epl_send, {Name2, Name1}, {3, 1})
+                            end
+                         end,
                          %% we have one key for each Pid pair
                          %% the smaller Pid is first element of the key
-                         case ets:lookup(epl_send, {Pid2, Pid1}) of
-                             [] -> ets:insert(epl_send, {{Pid2, Pid1}, 0, 1});
-                             _  -> ets:update_counter(epl_send,
-                                                      {Pid2, Pid1}, {3, 1})
+                         try
+
+                            case {Name1, Name2} of
+                                {Pid1, Pid2} -> ok;
+                                _ -> Insert()
+                            end
+
+                         catch
+                            _:_ -> Insert()
                          end,
                          F(F, Ref, Trace);
                      {trace_ts, Pid, send, _Msg, Pid, _TS} ->

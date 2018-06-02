@@ -46,7 +46,12 @@ node_info(NodeId) when is_list(NodeId) ->
             error ->
                 #{error => <<"Ports are not supported yet">>}
         end,
-    epl_json:encode(#{id => list_to_binary(NodeId), info => Info}, <<"node-info">>);
+    Id =
+        case maps:get(registered_name, Info, undefined) of
+            undefined -> list_to_binary(NodeId);
+            Name -> atom_to_binary(Name, utf8)
+        end,
+    epl_json:encode(#{id => Id, info => Info}, <<"node-info">>);
 node_info(NodeId) when is_binary(NodeId) ->
     node_info(binary_to_list(NodeId)).
 

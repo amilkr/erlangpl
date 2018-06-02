@@ -33,5 +33,6 @@ ui:
 	@yarn && yarn build
 	@mv build apps/epl/priv/htdocs
 
-release: all ui
+# release: all ui
+release: all
 	@./bootstrap
